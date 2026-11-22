@@ -58,6 +58,18 @@ def test_file_cache_put_is_atomic(tmp_path: Path, mocker: MockerFixture) -> None
     assert len(list(tmp_path.glob("*"))) == 1
 
 
+def test_file_cache_invalidates_on_duckdb_version_change(
+    tmp_path: Path, mocker: MockerFixture
+) -> None:
+    version = mocker.patch.object(d, "_installed_duckdb_version", return_value="1.5.6")
+    cache: FileCache[_TestEntry] = FileCache(tmp_path)
+    cache.put("model", value=_TestEntry(value="duckdb-1"))
+
+    version.return_value = "2.0.0"
+    new_cache: FileCache[_TestEntry] = FileCache(tmp_path)
+    assert new_cache.get("model") is None
+
+
 def test_optimized_query_cache(tmp_path: Path, mocker: MockerFixture):
     model = SqlModel(
         name="test_model",

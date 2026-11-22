@@ -89,7 +89,8 @@ class DuckDBEngineAdapter(LogicalMergeMixin, GetCurrentCatalogFromFunctionMixin,
             .from_("df")
             .sql(dialect=self.dialect)
         )
-        self.cursor.sql(f"CREATE TABLE {temp_table} AS {temp_table_sql}")
+        # DuckDB 2 can replace a partially read DB-API result with execute().
+        self.cursor.execute(f"CREATE TABLE {temp_table} AS {temp_table_sql}")
         return [
             SourceQuery(
                 query_factory=lambda: self._select_columns(target_columns_to_types).from_(

@@ -5,6 +5,7 @@ import pytest
 from pytest_mock.plugin import MockerFixture
 from sqlglot import expressions as exp
 from sqlglot import parse_one
+from sqlmesh.core.config.connection import DuckDBAttachOptions, DuckDBConnectionConfig
 from sqlmesh.core.engine_adapter import DuckDBEngineAdapter, EngineAdapter
 from tests.core.engine_adapter import to_sql_calls
 
@@ -66,6 +67,17 @@ def test_replace_query_pandas(adapter: EngineAdapter, duck_conn):
         "test_table", df, {"a": exp.DataType.build("long"), "b": exp.DataType.build("long")}
     )
     pd.testing.assert_frame_equal(adapter.fetchdf("SELECT * FROM test_table"), df)
+
+
+def test_insert_dataframe_after_fetchone(adapter: EngineAdapter):
+    adapter.execute("CREATE TABLE test_table (id INT)")
+    assert adapter.fetchone("SELECT * FROM range(100000)") == (0,)
+
+    adapter.insert_append(
+        "test_table", pd.DataFrame({"id": [1, 2]}), {"id": exp.DataType.build("INT")}
+    )
+
+    assert adapter.fetchall("SELECT id FROM test_table ORDER BY id") == [(1,), (2,)]
 
 
 def test_set_current_catalog(make_mocked_engine_adapter: t.Callable, duck_conn):
@@ -133,6 +145,36 @@ def ducklake_conn(duck_conn):
     # when missing, and Windows CI pre-installs it before pytest.
     duck_conn.load_extension("ducklake")
     return duck_conn
+
+
+@pytest.mark.xdist_group("ducklake_extension")
+def test_ducklake_read_only_snapshot(ducklake_conn, tmp_path):
+    path = tmp_path / "source.ducklake"
+    ducklake_conn.execute(f"ATTACH 'ducklake:{path}' AS source (DATA_PATH '{tmp_path}')")
+    ducklake_conn.execute("CREATE TABLE source.main.events (id INT)")
+    ducklake_conn.execute("INSERT INTO source.main.events VALUES (1)")
+    snapshot = ducklake_conn.execute(
+        "SELECT MAX(snapshot_id) FROM ducklake_snapshots('source')"
+    ).fetchall()[0][0]
+    ducklake_conn.execute("INSERT INTO source.main.events VALUES (2)")
+    ducklake_conn.execute("DETACH source")
+
+    adapter = DuckDBConnectionConfig(
+        catalogs={
+            "memory": ":memory:",
+            "source": DuckDBAttachOptions(type="ducklake", path=str(path), read_only=True),
+        },
+    ).create_engine_adapter()
+    try:
+        query = parse_one(
+            f"SELECT id FROM source.main.events AT (VERSION => {snapshot})", read="duckdb"
+        )
+        assert adapter.fetchall(query) == [(1,)]
+        assert adapter.fetchall("SELECT id FROM source.main.events ORDER BY id") == [(1,), (2,)]
+        with pytest.raises(Exception, match="read-only"):
+            adapter.execute("INSERT INTO source.main.events VALUES (3)")
+    finally:
+        adapter.close()
 
 
 @pytest.mark.xdist_group("ducklake_extension")

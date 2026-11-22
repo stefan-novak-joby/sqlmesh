@@ -266,7 +266,6 @@ jobs:
       matrix:
         engine:
           [
-            duckdb,
             postgres,
             mysql,
             mssql,
@@ -277,6 +276,11 @@ jobs:
             risingwave,
             starrocks,
           ]
+        include:
+          - engine: duckdb
+            duckdb-version: '1.5.6'
+          - engine: duckdb
+            duckdb-version: '2.0.0'
     env:
       PYTEST_XDIST_AUTO_NUM_WORKERS: 2
       SQLMESH__DISABLE_ANONYMIZED_ANALYTICS: '1'
@@ -289,6 +293,13 @@ jobs:
           python-version: '3.12'
       - name: Install uv
         uses: astral-sh/setup-uv@v7
+      - name: Pin DuckDB for the engine test matrix
+        if: matrix.duckdb-version != ''
+        env:
+          DUCKDB_TEST_VERSION: ${{ matrix.duckdb-version }}
+        run: |
+          printf 'duckdb==%s\n' "$DUCKDB_TEST_VERSION" > "$RUNNER_TEMP/duckdb-constraints.txt"
+          printf 'UV_CONSTRAINT=%s\n' "$RUNNER_TEMP/duckdb-constraints.txt" >> "$GITHUB_ENV"
       - name: Install SQLMesh dev dependencies
         run: |
           uv venv .venv
@@ -300,6 +311,12 @@ jobs:
         run: |
           source .venv/bin/activate
           make ${{ matrix.engine }}-test
+      - name: Run dbt integration tests with DuckDB 2.0
+        if: matrix.duckdb-version == '2.0.0'
+        run: |
+          source .venv/bin/activate
+          pytest -n auto tests/dbt/test_model.py tests/dbt/test_custom_materializations.py \
+            --junitxml=test-results/junit-dbt-duckdb-2.xml
       - name: Stop DataLake services
         if: ${{ always() && matrix.engine == 'clickhouse-datalake' }}
         run: make clickhouse-datalake-down
@@ -307,7 +324,7 @@ jobs:
         uses: actions/upload-artifact@v7
         if: ${{ !cancelled() }}
         with:
-          name: test-results-docker-${{ matrix.engine }}
+          name: test-results-docker-${{ matrix.engine }}${{ matrix.duckdb-version && format('-{0}', matrix.duckdb-version) || '' }}
           path: test-results/
           retention-days: 7
 

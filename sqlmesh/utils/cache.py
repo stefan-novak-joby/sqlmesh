@@ -9,6 +9,7 @@ import tempfile
 import typing as t
 from pathlib import Path
 
+from sqlglot import Dialect
 from sqlglot import __version__ as SQLGLOT_VERSION
 
 from sqlmesh.utils import sanitize_name
@@ -48,6 +49,8 @@ class FileCache(t.Generic[T]):
         except ImportError:
             major, minor = 0, 0
 
+        # SQLGlot parses DuckDB SQL differently across engine versions.
+        duckdb_version = ".".join(map(str, Dialect.get_or_raise("duckdb").version))
         self._cache_version = "_".join(
             [
                 str(major),
@@ -55,6 +58,7 @@ class FileCache(t.Generic[T]):
                 SQLGLOT_MAJOR_VERSION,
                 SQLGLOT_MINOR_VERSION,
                 str(SCHEMA_VERSION),
+                f"duckdb{duckdb_version}",
             ]
         )
 
