@@ -38,3 +38,18 @@ def test_lineage():
     context.upsert_model(model)
     node = lineage('"A"', model)
     assert node.name == "A"
+
+
+def test_lineage_without_source_schema():
+    model = load_sql_based_model(
+        d.parse("MODEL (name db.model2); SELECT a AS first, b AS second FROM raw.source")
+    )
+
+    first = lineage("first", model)
+    second = lineage("second", model)
+
+    for node, column in ((first, "a"), (second, "b")):
+        (source,) = node.downstream
+        assert source.expression.name == "source"
+        assert source.expression.db == "raw"
+        assert source.name.rsplit(".", 1)[-1].strip('"') == column

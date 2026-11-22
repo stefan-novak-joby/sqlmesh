@@ -9,6 +9,9 @@ from contextlib import contextmanager
 from difflib import unified_diff
 from enum import Enum, auto
 from functools import lru_cache
+from importlib.metadata import version
+
+from packaging.version import Version
 
 from sqlglot import Dialect, Generator, ParseError, Parser, Tokenizer, TokenType, exp
 from sqlglot.dialects.dialect import DialectType
@@ -16,6 +19,7 @@ from sqlglot.dialects import DuckDB, Snowflake, TSQL
 import sqlglot.dialects.athena as athena
 import sqlglot.generators.athena as athena_generators
 from sqlglot.parsers.athena import AthenaTrinoParser
+from sqlglot.generator import _DISPATCH_CACHE
 from sqlglot.helper import seq_get
 from sqlglot.optimizer.normalize_identifiers import normalize_identifiers
 from sqlglot.optimizer.qualify_columns import quote_identifiers
@@ -315,16 +319,21 @@ def _parse_with(self: Parser, skip_with_token: bool = False) -> t.Optional[exp.E
 
 
 def _parse_join(
-    self: Parser, skip_join_token: bool = False, parse_bracket: bool = False
+    self: Parser,
+    skip_join_token: bool = False,
+    parse_bracket: bool = False,
+    alias_tokens: t.Optional[t.Collection[TokenType]] = None,
 ) -> t.Optional[exp.Expr]:
     index = self._index
     method, side, kind = self._parse_join_parts()
     macro = _parse_matching_macro(self, "JOIN")
     if not macro:
         self._retreat(index)
-        return self.__parse_join(skip_join_token=skip_join_token, parse_bracket=parse_bracket)  # type: ignore
+        return self.__parse_join(  # type: ignore
+            skip_join_token=skip_join_token, parse_bracket=parse_bracket, alias_tokens=alias_tokens
+        )
 
-    join = self.__parse_join(skip_join_token=True)  # type: ignore
+    join = self.__parse_join(skip_join_token=True, alias_tokens=alias_tokens)  # type: ignore
     if method:
         join.set("method", method.text)
     if side:
@@ -354,7 +363,6 @@ def _parse_select(
     parse_subquery_alias: bool = True,
     parse_set_operation: bool = True,
     consume_pipe: bool = True,
-    from_: t.Optional[exp.From] = None,
 ) -> t.Optional[exp.Expr]:
     select = self.__parse_select(  # type: ignore
         nested=nested,
@@ -362,7 +370,6 @@ def _parse_select(
         parse_subquery_alias=parse_subquery_alias,
         parse_set_operation=parse_set_operation,
         consume_pipe=consume_pipe,
-        from_=from_,
     )
 
     if (
@@ -549,36 +556,6 @@ def _parse_table_parts(
         return StagedFilePath(**table.args)
 
     return table
-
-
-# Only needed for T-SQL: it spells a column's nullability right after its type, e.g.
-# ALTER TABLE t ALTER COLUMN c INT NOT NULL. Without this the trailing clause is left
-# over, so the whole statement falls back to a Command and any macros it contains (such as
-# @this_model) are no longer resolved, which means they reach the engine verbatim.
-#
-# See: https://learn.microsoft.com/en-us/sql/t-sql/statements/alter-table-transact-sql
-def _parse_alter_table_alter(self: Parser) -> t.Optional[exp.Expr]:
-    alter_column = self.__parse_alter_table_alter()  # type: ignore
-
-    if isinstance(alter_column, exp.AlterColumn) and alter_column.args.get("dtype"):
-        if self._match_pair(TokenType.NOT, TokenType.NULL):
-            alter_column.set("allow_null", False)
-        elif self._match(TokenType.NULL):
-            alter_column.set("allow_null", True)
-
-    return alter_column
-
-
-def altercolumn_sql(self: Generator, expression: exp.AlterColumn) -> str:
-    sql = self._altercolumn_sql(expression)  # type: ignore
-
-    # sqlglot's generator returns as soon as it renders the type, so the nullability parsed
-    # above has to be appended here
-    allow_null = expression.args.get("allow_null")
-    if expression.args.get("dtype") and allow_null is not None:
-        sql = f"{sql} NULL" if allow_null else f"{sql} NOT NULL"
-
-    return sql
 
 
 def _parse_if(self: Parser) -> t.Optional[exp.Expr]:
@@ -983,8 +960,10 @@ def _whens_sql(self: Generator, expression: exp.Whens) -> str:
     return self.wrap(self.expressions(expression, sep=" ", indent=False))
 
 
-def _parse_interval_span(self: Parser, this: exp.Expr) -> exp.Interval:
-    interval = self.__parse_interval_span(this)  # type: ignore
+def _parse_interval_span(
+    self: Parser, this: exp.Expr, parse_function_unit: bool = True
+) -> exp.Interval:
+    interval = self.__parse_interval_span(this, parse_function_unit=parse_function_unit)  # type: ignore
     # Without this, @unit in `INTERVAL @value @unit` is misread as an alias.
     if not interval.args.get("unit") and self._match(TokenType.PARAMETER):
         macro = _parse_macro(self)
@@ -1341,6 +1320,19 @@ def parse(
     return expressions
 
 
+@lru_cache(maxsize=1)
+def _installed_duckdb_version() -> str:
+    return Version(version("duckdb")).base_version
+
+
+def _init_duckdb_dialect(self: DuckDB, **kwargs: t.Any) -> None:
+    # SQLGlot defaults to the latest syntax and semantics. Use the installed
+    # engine for unversioned DuckDB SQL, including on older supported engines.
+    if "version" not in kwargs:
+        kwargs["version"] = _installed_duckdb_version()
+    super(DuckDB, self).__init__(**kwargs)
+
+
 def extend_sqlglot() -> None:
     """Extend SQLGlot with SQLMesh's custom macro aware dialect."""
     tokenizers = {Tokenizer}
@@ -1398,6 +1390,11 @@ def extend_sqlglot() -> None:
                     exp.Whens: _whens_sql,
                 }
             )
+        # SQLGlot may have cached this generator before SQLMesh was imported.
+        # Refresh in place so existing generator instances see the transforms.
+        if dispatch := _DISPATCH_CACHE.get(generator):
+            dispatch.update(generator.TRANSFORMS)
+
         if MacroDef not in generator.WITH_SEPARATED_COMMENTS:
             generator.WITH_SEPARATED_COMMENTS = (
                 *generator.WITH_SEPARATED_COMMENTS,
@@ -1430,9 +1427,8 @@ def extend_sqlglot() -> None:
     _override(Parser, _parse_interval_span)
     _override(Parser, _warn_unsupported)
     _override(Snowflake.Parser, _parse_table_parts)
-    _override(TSQL.Parser, _parse_alter_table_alter)
-    _override(TSQL.Generator, altercolumn_sql)
 
+    setattr(DuckDB, "__init__", _init_duckdb_dialect)
     # DuckDB's prefix absolute power operator `@` clashes with the macro syntax
     DuckDB.Parser.NO_PAREN_FUNCTION_PARSERS.pop("@", None)
 

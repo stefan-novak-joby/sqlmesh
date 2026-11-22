@@ -3360,7 +3360,7 @@ def test_python_models_returning_sql(assert_exp_eq) -> None:
         """,
     )
     post_statement = context.get_model("model1").post_statements[0].sql(dialect="snowflake")  # type: ignore
-    assert post_statement == "PUT file:///dir/tmp.csv @%table"
+    assert post_statement == "PUT 'file:///dir/tmp.csv' @%table"
 
     assert isinstance(model2, SqlModel)
     assert isinstance(model2.query, d.MacroFunc)
@@ -9225,7 +9225,9 @@ def test_merge_filter():
       )
       AND "{MERGE_SOURCE_ALIAS}"."ds" > @start_ds
       AND "{MERGE_SOURCE_ALIAS}"."_operation" <> 1
-      AND "{MERGE_TARGET_ALIAS}"."start_date" > CURRENT_DATE + INTERVAL '7' DAY
+      AND "{MERGE_TARGET_ALIAS}"."start_date" > (
+        CURRENT_DATE + INTERVAL '7' DAY
+      )
     ),
     batch_concurrency 1,
     forward_only FALSE,
@@ -9244,7 +9246,7 @@ FROM db.upstream"""
     rendered_merge_filters = model.render_merge_filter(start="2023-01-01", end="2023-01-02")
     assert (
         rendered_merge_filters.sql(dialect="hive")
-        == "(`__MERGE_SOURCE__`.`ds` > (SELECT MAX(`ds`) FROM `db`.`test`) AND `__MERGE_SOURCE__`.`ds` > '2023-01-01' AND `__MERGE_SOURCE__`.`_operation` <> 1 AND `__MERGE_TARGET__`.`start_date` > CURRENT_DATE + INTERVAL '7' DAY)"
+        == "(`__MERGE_SOURCE__`.`ds` > (SELECT MAX(`ds`) FROM `db`.`test`) AND `__MERGE_SOURCE__`.`ds` > '2023-01-01' AND `__MERGE_SOURCE__`.`_operation` <> 1 AND `__MERGE_TARGET__`.`start_date` > (CURRENT_DATE + INTERVAL '7' DAY))"
     )
 
 

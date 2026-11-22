@@ -13,8 +13,9 @@ from traceback import walk_tb
 
 from jinja2 import Environment, Template, nodes, UndefinedError
 from jinja2.runtime import Macro
-from sqlglot import Dialect, Parser, TokenType
+from sqlglot import Dialect, Parser, TokenType, exp
 from sqlglot.expressions import Expression
+from sqlglot.optimizer.simplify import gen
 
 from sqlmesh.core import constants as c
 from sqlmesh.core import dialect as d
@@ -222,11 +223,18 @@ def is_variable_node(n: nodes.Node) -> bool:
 
 
 def extract_macro_references_and_variables(
-    *jinja_strs: str,
+    *templates: t.Union[str, exp.Expr],
 ) -> t.Tuple[t.Set[MacroReference], t.Set[str]]:
     macro_references = set()
     variables = set()
-    for jinja_str in jinja_strs:
+    for template in templates:
+        if isinstance(template, d.Jinja):
+            # SQLGlot escapes SQL string literals. Jinja needs the raw template text.
+            jinja_str = template.name
+        elif isinstance(template, exp.Expr):
+            jinja_str = gen(template)
+        else:
+            jinja_str = template
         for call_name, node in extract_call_names(jinja_str):
             if call_name[0] in (c.VAR, c.BLUEPRINT_VAR):
                 if not is_variable_node(node):

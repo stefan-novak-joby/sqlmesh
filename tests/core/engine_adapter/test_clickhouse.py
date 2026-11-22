@@ -1608,7 +1608,7 @@ def test_virtual_catalog_stripped_in_alter_table(make_mocked_engine_adapter: t.C
     alter_expr = exp.Alter(
         this=exp.to_table("__ch_gw__.mydb.my_table"),
         kind="TABLE",
-        actions=[exp.Drop(this=exp.to_column("col_a"), kind="COLUMN")],
+        actions=[exp.Drop(tables=[exp.to_column("col_a")], kind="COLUMN")],
     )
     adapter.alter_table([alter_expr])
 
@@ -1618,6 +1618,7 @@ def test_virtual_catalog_stripped_in_alter_table(make_mocked_engine_adapter: t.C
     assert "mydb" in sql_calls[0]
     assert "my_table" in sql_calls[0]
     assert "ALTER TABLE" in sql_calls[0]
+    assert "col_a" in sql_calls[0]
 
 
 @pytest.mark.parametrize(

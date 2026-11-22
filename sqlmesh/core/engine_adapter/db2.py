@@ -640,7 +640,7 @@ class Db2EngineAdapter(
                 return
             raise SQLMeshError(f"View '{table.sql(dialect=self.dialect)}' does not exist.")
 
-        self.execute(exp.Drop(this=table, kind="VIEW", exists=False))
+        self.execute(exp.Drop(tables=[table], kind="VIEW", exists=False))
         self._clear_data_object_cache(view_name)
 
     def _get_data_objects(
@@ -794,7 +794,7 @@ class Db2EngineAdapter(
                 for (obj_name,) in self.cursor.fetchall():
                     self.execute(
                         exp.Drop(
-                            this=exp.to_table(f"{schema_name_str}.{obj_name}"),
+                            tables=[exp.to_table(f"{schema_name_str}.{obj_name}")],
                             kind=kind,
                         )
                     )

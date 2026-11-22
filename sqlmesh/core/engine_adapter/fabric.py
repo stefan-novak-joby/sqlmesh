@@ -394,7 +394,7 @@ class FabricEngineAdapter(MSSQLEngineAdapter):
                             exp.Alter(
                                 this=table_name_without_catalog.copy(),
                                 kind="TABLE",
-                                actions=[exp.Drop(this=column_to_alter.copy(), kind="COLUMN")],
+                                actions=[exp.Drop(tables=[column_to_alter.copy()], kind="COLUMN")],
                             )
                         )
                         self.execute(drop_sql)

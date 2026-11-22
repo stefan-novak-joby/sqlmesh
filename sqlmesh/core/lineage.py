@@ -12,11 +12,13 @@ from sqlglot.optimizer import Scope, build_scope, qualify
 from sqlmesh.core.dialect import normalize_mapping_schema, normalize_model_name
 
 if t.TYPE_CHECKING:
+    from sqlglot.schema import MappingSchema
+
     from sqlmesh.core.context import Context
     from sqlmesh.core.model import Model
 
 
-CACHE: t.Dict[str, t.Tuple[int, exp.Expr, Scope]] = {}
+CACHE: t.Dict[str, t.Tuple[int, exp.Expr, Scope, MappingSchema]] = {}
 
 
 def lineage(
@@ -25,17 +27,11 @@ def lineage(
     trim_selects: bool = True,
     **kwargs: t.Any,
 ) -> Node:
-    query: t.Optional[exp.Expr] = None
-    scope: t.Optional[Scope] = None
-
-    if model.name in CACHE:
-        obj_id, query, scope = CACHE[model.name]
-
-        if obj_id != id(model):
-            query = None
-            scope = None
-
-    if not query or not scope:
+    scope: t.Optional[Scope]
+    cached = CACHE.get(model.name)
+    if cached and cached[0] == id(model):
+        _, query, scope, schema = cached
+    else:
         query = t.cast(exp.Query, model.render_query_or_raise().copy())
 
         if model.managed_columns:
@@ -48,21 +44,23 @@ def lineage(
                 copy=False,
             )
 
+        schema = normalize_mapping_schema(model.mapping_schema, dialect=model.dialect)
         query = qualify.qualify(
             query,
             dialect=model.dialect,
-            schema=normalize_mapping_schema(model.mapping_schema, dialect=model.dialect),
-            **{"validate_qualify_columns": False, "infer_schema": True, **kwargs},
+            schema=schema,
+            **{"validate_qualify_columns": False, **kwargs},
         )
 
         scope = build_scope(query)
 
         if scope:
-            CACHE[model.name] = (id(model), query, scope)
+            CACHE[model.name] = (id(model), query, scope, schema)
 
     return sqlglot_lineage(
         column,
         sql=query,
+        schema=schema,
         scope=scope,
         trim_selects=trim_selects,
         dialect=model.dialect,

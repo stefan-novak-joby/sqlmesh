@@ -10,6 +10,7 @@ from pathlib import Path
 
 from pydantic import Field
 from sqlglot import exp
+from sqlglot.dialects.dialect import STRICT_TIME_FORMATS
 from sqlglot.helper import seq_get
 from sqlglot.optimizer.qualify_columns import quote_identifiers
 from sqlglot.optimizer.simplify import gen
@@ -832,10 +833,14 @@ class _Model(ModelMeta, frozen=True):
             return
 
         if self.time_column.format:
-            # Transpile the time column format into the generic dialect
+            # Time columns use Python strftime, which does not support SQLGlot's strict tokens.
+            time_mapping = d.Dialect.get_or_raise(self.dialect).TIME_MAPPING
             formatted_time = format_time(
                 self.time_column.format,
-                d.Dialect.get_or_raise(self.dialect).TIME_MAPPING,
+                {
+                    token: STRICT_TIME_FORMATS.get(python_format, python_format)
+                    for token, python_format in time_mapping.items()
+                },
             )
             assert formatted_time is not None
             self.time_column.format = formatted_time
@@ -2660,7 +2665,7 @@ def _create_model(
         statements.append(kwargs["kind"].merge_filter)
 
     jinja_macro_references, referenced_variables = extract_macro_references_and_variables(
-        *(gen(e if isinstance(e, exp.Expr) else e[0]) for e in statements)
+        *(e if isinstance(e, exp.Expr) else e[0] for e in statements)
     )
 
     if jinja_macros:

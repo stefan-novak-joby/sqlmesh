@@ -185,7 +185,9 @@ class SnowflakeEngineAdapter(
         )
         normalize_identifiers(exists_check, dialect=self.dialect)
         if self.fetchone(exists_check, quote_identifiers=True) is not None:
-            self.execute(exp.Drop(this=exp.Table(this=catalog_name), kind="DATABASE", exists=True))
+            self.execute(
+                exp.Drop(tables=[exp.Table(this=catalog_name)], kind="DATABASE", exists=True)
+            )
         else:
             logger.warning(
                 f"Not dropping database {catalog_name.sql(dialect=self.dialect)} because there is no indication it is '{c.SQLMESH_MANAGED}'"
@@ -310,6 +312,11 @@ class SnowflakeEngineAdapter(
 
     def drop_managed_table(self, table_name: TableName, exists: bool = True) -> None:
         self._drop_object(table_name, exists, kind=self.MANAGED_TABLE_KIND)
+
+    def _build_clustered_by_exp(
+        self, clustered_by: t.List[exp.Expr], **kwargs: t.Any
+    ) -> exp.ClusterProperty:
+        return exp.ClusterProperty(expressions=[column.copy() for column in clustered_by])
 
     def _build_table_properties_exp(
         self,

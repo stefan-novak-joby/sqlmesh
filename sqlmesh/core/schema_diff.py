@@ -128,7 +128,7 @@ class TableAlterDropColumnOperation(TableAlterColumnOperation):
 
     @property
     def _alter_actions(self) -> t.List[exp.Expr]:
-        return [exp.Drop(this=self.column, kind="COLUMN", cascade=self.cascade)]
+        return [exp.Drop(tables=[self.column], kind="COLUMN", cascade=self.cascade)]
 
 
 @dataclass(frozen=True)

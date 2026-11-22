@@ -1,4 +1,5 @@
 import importlib.util
+import subprocess
 import sys
 import pytest
 from sqlglot import Dialect, ParseError, exp, parse_one
@@ -1593,6 +1594,27 @@ def test_pipe_syntax():
     )
 
 
+def test_from_first_query_with_join_and_interval():
+    query = d.parse_one("FROM a JOIN b ON a.id = b.id SELECT INTERVAL '1' DAY", "duckdb")
+
+    assert query.sql("duckdb") == "SELECT INTERVAL '1' DAY FROM a JOIN b ON a.id = b.id"
+
+
+def test_extend_sqlglot_refreshes_existing_generator():
+    script = """
+from sqlglot import Generator
+
+generator = Generator()
+from sqlmesh.core import dialect
+
+print(generator.generate(dialect.jinja_query('SELECT {{ 1 }}')))
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script], capture_output=True, text=True, check=True
+    )
+    assert result.stdout.splitlines() == ["JINJA_QUERY_BEGIN;", "SELECT {{ 1 }}", "JINJA_END;"]
+
+
 def test_extend_sqlglot_is_idempotent():
     # extend_sqlglot() runs at import time; calling it again must not re-wrap the
     # already-installed overrides, otherwise they call themselves (RecursionError).
@@ -1605,3 +1627,19 @@ def test_extend_sqlglot_is_idempotent():
     assert parse_one("SELECT CAST(1 AS INT)").sql() == "SELECT CAST(1 AS INT)"
     # The class-level registries must not grow on repeated calls.
     assert Generator.UNWRAPPED_INTERVAL_VALUES == before
+
+
+@pytest.mark.parametrize(("engine_version", "match"), [("1.5.6", False), ("2.0.0", True)])
+def test_duckdb_regex_uses_engine_version(monkeypatch, duck_conn, engine_version, match):
+    monkeypatch.setattr(d, "_installed_duckdb_version", lambda: engine_version)
+    query = d.parse_one("SELECT 'abc' ~ 'b', 'abc' !~ 'b'", dialect="duckdb")
+
+    assert duck_conn.execute(query.sql("duckdb")).fetchall() == [(match, not match)]
+
+
+def test_duckdb_lambda_generation_respects_explicit_version(monkeypatch):
+    monkeypatch.setattr(d, "_installed_duckdb_version", lambda: "1.2.2")
+    query = d.parse_one("SELECT LIST_TRANSFORM([1, 2], x -> x + 1)", dialect="duckdb")
+
+    assert query.sql("duckdb") == "SELECT LIST_TRANSFORM([1, 2], x -> x + 1)"
+    assert query.sql("duckdb, version=2.0.0") == "SELECT LIST_TRANSFORM([1, 2], LAMBDA x : x + 1)"

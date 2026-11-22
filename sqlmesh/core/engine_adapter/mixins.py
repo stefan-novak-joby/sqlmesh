@@ -320,6 +320,8 @@ class TableAlterChangeClusterKeyOperation(TableAlterClusterByOperation):
 
     @property
     def _alter_actions(self) -> t.List[exp.Expr]:
+        if self.dialect == "snowflake":
+            return [exp.ClusterProperty(expressions=self.cluster_key_expressions)]
         return [exp.Cluster(expressions=self.cluster_key_expressions)]
 
     @property
@@ -352,7 +354,7 @@ class ClusteredByMixin(EngineAdapter):
         self,
         clustered_by: t.List[exp.Expr],
         **kwargs: t.Any,
-    ) -> t.Optional[exp.Cluster]:
+    ) -> t.Optional[exp.Cluster | exp.ClusterProperty]:
         return exp.Cluster(expressions=[c.copy() for c in clustered_by])
 
     def get_alter_operations(

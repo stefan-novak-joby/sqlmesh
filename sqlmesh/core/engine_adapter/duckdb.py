@@ -68,7 +68,10 @@ class DuckDBEngineAdapter(LogicalMergeMixin, GetCurrentCatalogFromFunctionMixin,
         else:
             self.execute(
                 exp.Drop(
-                    this=exp.Table(this=catalog_name), kind="DATABASE", cascade=True, exists=True
+                    tables=[exp.Table(this=catalog_name)],
+                    kind="DATABASE",
+                    cascade=True,
+                    exists=True,
                 )
             )
 

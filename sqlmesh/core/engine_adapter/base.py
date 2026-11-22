@@ -1212,7 +1212,7 @@ class EngineAdapter:
         if cascade and kind.upper() in self.SUPPORTED_DROP_CASCADE_OBJECT_KINDS:
             drop_args["cascade"] = cascade
 
-        self.execute(exp.Drop(this=exp.to_table(name), kind=kind, exists=exists, **drop_args))
+        self.execute(exp.Drop(tables=[exp.to_table(name)], kind=kind, exists=exists, **drop_args))
         self._clear_data_object_cache(name)
 
     def get_alter_operations(
@@ -2795,7 +2795,7 @@ class EngineAdapter:
         self,
         clustered_by: t.List[exp.Expr],
         **kwargs: t.Any,
-    ) -> t.Optional[exp.Cluster]:
+    ) -> t.Optional[exp.Cluster | exp.ClusterProperty]:
         return None
 
     def adjust_physical_properties_for_incremental(

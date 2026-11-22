@@ -753,7 +753,6 @@ class QueryRenderer(BaseExpressionRenderer):
                             query,
                             dialect=self._dialect,
                             schema=self.schema,
-                            infer_schema=False,
                             catalog=self._default_catalog,
                             quote_identifiers=self._quote_identifiers,
                         ),
